@@ -1,36 +1,49 @@
 name: CI
 
 on:
-  pull_request:
   push:
     branches: [ main ]
+  pull_request:           # PR 열릴 때도 실행 (Required checks에 잘 뜨게)
+  workflow_dispatch:      # 수동 실행 버튼도 추가
 
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    env:
+      # IPv6 라우팅 이슈 회피 (간헐 타임아웃 줄이기)
+      GRADLE_OPTS: "-Djava.net.preferIPv4Stack=true -Djava.net.preferIPv4Addresses=true"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Gradle Wrapper 무결성 검사(보안상 강추)
+      # Gradle Wrapper 무결성 검사(보안)
       - name: Validate Gradle Wrapper
         uses: gradle/actions/wrapper-validation@v3
+
+      # Gradle 캐시/설정 (다운로드 안정 + 속도)
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
 
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
-          java-version: '21'       # 프로젝트 JDK 버전에 맞추세요(17 또는 21 권장)
+          java-version: '21'       # 프로젝트 JDK에 맞춰 조정
           distribution: 'temurin'
-          cache: 'gradle'          # 의존성 캐시로 속도↑
+          cache: 'gradle'          # 의존성 캐시
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build & Test
-        run: ./gradlew clean build --no-daemon
+      # 네트워크 일시 오류 대비 재시도
+      - name: Build & Test (retry)
+        uses: nick-invision/retry@v3
+        with:
+          max_attempts: 3
+          timeout_minutes: 20
+          command: ./gradlew clean build --no-daemon
 
-      # 실패 원인 파악용 리포트 업로드(선택)
+      # 테스트 리포트 업로드 (없어도 실패하지 않게)
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -39,4 +52,4 @@ jobs:
           path: |
             build/reports/tests/test
             build/test-results/test
-
+          if-no-files-found: ignore
